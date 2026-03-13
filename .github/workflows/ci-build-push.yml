@@ -1,0 +1,129 @@
+# ================================================================
+# NOM DU WORKFLOW COMPLET
+# C'est ce nom qui apparaît dans l'onglet "Actions" de ton dépôt GitHub
+# On met un nom descriptif pour savoir tout de suite ce qu'il fait
+# ================================================================
+name: Spring Boot CI + Build & Push Docker (Exercice 3)
+
+# ================================================================
+# DÉCLENCHEURS : QUAND ce workflow doit-il s'exécuter ?
+# ================================================================
+on:
+  # Se déclenche automatiquement sur chaque "git push" vers ces branches
+  push:
+    branches:
+      - main      # branche de production → on veut build + push l'image Docker
+      - develop   # branche de dev → on fait juste les tests (pas de push image)
+
+  # Se déclenche aussi quand on crée ou met à jour une Pull Request
+  # vers ces branches (très utile pour vérifier avant de merger)
+  pull_request:
+    branches:
+      - main
+      - develop
+
+# ================================================================
+# LES JOBS : les "tâches" indépendantes (chaque job = une VM séparée)
+# On en a deux ici :
+#   1. test     → toujours exécuté (push + PR)
+#   2. build-and-push → SEULEMENT sur main ET si les tests passent
+# ================================================================
+jobs:
+
+  # ────────────────────────────────────────────────
+  # JOB 1 : TESTS (obligatoire avant tout déploiement)
+  # ────────────────────────────────────────────────
+  test:
+    # Nom affiché dans l'interface GitHub (plus lisible que "test")
+    name: Tests unitaires & d'intégration
+
+    # La machine virtuelle utilisée (toujours la dernière version stable d'Ubuntu)
+    runs-on: ubuntu-latest
+
+    # Les étapes qui s'exécutent dans l'ordre dans cette VM
+    steps:
+
+      # Étape 1 : Récupérer tout le code du dépôt (indispensable !)
+      - name: Récupérer le code source du dépôt
+        uses: actions/checkout@v4
+        # v4 = version stable et recommandée en 2026
+
+      # Étape 2 : Installer Java 17 + mettre en cache les dépendances Maven
+      - name: Installer Java 17 (Temurin) + cache Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'              # exactement la version de ton projet
+          distribution: 'temurin'         # distribution open-source fiable (Eclipse Adoptium)
+          cache: maven                    # super important : évite de retélécharger ~500 Mo à chaque run
+
+      # Étape 3 : Compiler + lancer TOUS les tests
+      - name: Compiler le projet et exécuter les tests
+        run: |
+          mvn clean verify \
+            --batch-mode \                # mode non-interactif = logs plus propres en CI
+            --no-transfer-progress \      # masque la barre de progression des téléchargements
+            --errors                      # affiche la stacktrace complète en cas d'erreur
+
+  # ────────────────────────────────────────────────
+  # JOB 2 : BUILD & PUSH DE L'IMAGE DOCKER
+  # ────────────────────────────────────────────────
+  build-and-push:
+    # Nom visible dans GitHub
+    name: Build JAR + Construire & Pousser l'image Docker Hub
+
+    # Même type de machine
+    runs-on: ubuntu-latest
+
+    # Conditions pour lancer ce job :
+    #   1. Les tests doivent avoir réussi (sinon inutile de build/push)
+    #   2. On est sur la branche main (pas sur develop ou une PR)
+    needs: test                               # attend que le job "test" termine avec succès
+    if: github.ref == 'refs/heads/main'       # syntaxe GitHub pour "si la branche est main"
+
+    steps:
+
+      # Étape 1 : Récupérer à nouveau le code (chaque job a sa propre VM → checkout obligatoire)
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      # Étape 2 : Réinstaller Java + cache (on le refait car VM différente)
+      - name: Installer Java 17 + cache Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Étape 3 : Compiler le JAR (on skippe les tests car déjà faits dans le job précédent)
+      - name: Compiler et packager le JAR (sans relancer les tests)
+        run: mvn clean package -DskipTests --batch-mode --no-transfer-progress
+
+      # ────────────────────────────────────────────────
+      # PARTIE DOCKER : on passe aux outils officiels Docker pour GitHub Actions
+      # ────────────────────────────────────────────────
+
+      # Étape 4 : Installer Docker Buildx (permet de build des images avancées, multi-arch, cache efficace)
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v4     # v4 = dernière version stable en mars 2026
+
+      # Étape 5 : Se connecter à Docker Hub avec les secrets GitHub
+      # IMPORTANT : on utilise JAMAIS ton mot de passe Docker Hub ici → toujours un token
+      - name: Se connecter à Docker Hub
+        uses: docker/login-action@v4            # v4 = version actuelle recommandée
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}   # ton username Docker Hub (ex: tonpseudo)
+          password: ${{ secrets.DOCKERHUB_TOKEN }}      # le Personal Access Token (PAT) que tu as créé
+
+      # Étape 6 : Construire l'image ET la pousser sur Docker Hub
+      - name: Construire et pousser l'image Docker
+        uses: docker/build-push-action@v7       # v7 = dernière version majeure en mars 2026
+        with:
+          context: .                            # dossier courant = racine du projet (où se trouve le Dockerfile)
+          file: ./Dockerfile                    # chemin vers ton Dockerfile (optionnel si nommé exactement Dockerfile)
+          push: true                            # vrai = on pousse vraiment sur le registry (sinon juste build local)
+          tags: |                               # liste des tags à appliquer à l'image (multi-lignes avec |)
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo-app:latest          # tag "latest" = la version la plus récente
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo-app:${{ github.sha }}  # tag avec le SHA du commit = traçabilité
+          # Optionnel : si tu veux build pour plusieurs architectures (amd64 + arm64 pour Mac M1/M2, etc.)
+          # platforms: linux/amd64,linux/arm64
+          # (nécessite aussi docker/setup-qemu-action@v3 avant Buildx si tu actives ça)
