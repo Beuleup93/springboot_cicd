@@ -57,12 +57,13 @@ jobs:
           cache: maven                    # super important : évite de retélécharger ~500 Mo à chaque run
 
       # Étape 3 : Compiler + lancer TOUS les tests
-      - name: Compiler le projet et exécuter les tests
+      - name: Compiler et exécuter les tests
+        # On exécute cette commande dans le terminal de la machine virtuelle
         run: |
           mvn clean verify \
-            --batch-mode \                # mode non-interactif = logs plus propres en CI
-            --no-transfer-progress \      # masque la barre de progression des téléchargements
-            --errors                      # affiche la stacktrace complète en cas d'erreur
+            --batch-mode \
+            --no-transfer-progress \
+            --errors
 
   # ────────────────────────────────────────────────
   # JOB 2 : BUILD & PUSH DE L'IMAGE DOCKER
@@ -121,9 +122,6 @@ jobs:
           context: .                            # dossier courant = racine du projet (où se trouve le Dockerfile)
           file: ./Dockerfile                    # chemin vers ton Dockerfile (optionnel si nommé exactement Dockerfile)
           push: true                            # vrai = on pousse vraiment sur le registry (sinon juste build local)
-          tags: |                               # liste des tags à appliquer à l'image (multi-lignes avec |)
-            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo-app:latest          # tag "latest" = la version la plus récente
-            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo-app:${{ github.sha }}  # tag avec le SHA du commit = traçabilité
-          # Optionnel : si tu veux build pour plusieurs architectures (amd64 + arm64 pour Mac M1/M2, etc.)
-          # platforms: linux/amd64,linux/arm64
-          # (nécessite aussi docker/setup-qemu-action@v3 avant Buildx si tu actives ça)
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo:${{ github.sha }}
