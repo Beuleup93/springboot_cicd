@@ -8,8 +8,8 @@ class DemoGithubApplicationTests {
 
 	@Test
 	void contextLoads() {
-		org.junit.jupiter.api.Assertions.assertEquals(42, 10 + 10,
-				"Assertion volontairement fausse pour voir l'échec du pipeline");
+		org.junit.jupiter.api.Assertions.assertEquals(20, 10 + 10,
+				"Assertion False"); //Assertion volontairement fausse pour voir l'échec du pipeline
 	}
 
 }
