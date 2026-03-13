@@ -1,0 +1,106 @@
+# ================================================================
+# NOM DU WORKFLOW
+# C'est le nom qui apparaîtra dans l'onglet "Actions" de GitHub
+# ================================================================
+name: Spring Boot Tests (Exercice 2 - Tests de base)
+
+# ================================================================
+# QUAND est-ce que ce pipeline doit s'exécuter ?
+# ================================================================
+on:
+  # Se déclenche quand on fait un "push" (git push) sur certaines branches
+  push:
+    branches:
+      - main          # branche principale (production)
+      - develop       # branche de développement / intégration
+
+  # Se déclenche aussi quand on crée ou met à jour une Pull Request
+  pull_request:
+    branches:
+      - main
+      - develop       # on veut tester avant de merger dans ces branches
+
+# ================================================================
+# LES JOBS = les grandes étapes / machines virtuelles lancées
+# Ici on n'en a qu'un seul pour l'exercice 2
+# ================================================================
+jobs:
+
+  # Nom interne du job (on le voit dans les logs)
+  test:
+    # Nom affiché dans l'interface GitHub (plus lisible)
+    name: Exécuter les tests unitaires & d'intégration
+
+    # Sur quelle machine virtuelle on lance ce job ?
+    # ubuntu-latest = la version la plus récente d'Ubuntu (recommandé)
+    runs-on: ubuntu-latest
+
+    # Étapes = les commandes qui s'exécutent les unes après les autres
+    steps:
+
+      # ────────────────────────────────────────────────
+      # Étape 1 : Récupérer le code source du projet
+      # ────────────────────────────────────────────────
+      - name: Récupérer le code du dépôt
+        # Action officielle GitHub → très utilisée
+        uses: actions/checkout@v4
+        # Pas besoin de paramètres particuliers ici
+
+
+      # ────────────────────────────────────────────────
+      # Étape 2 : Installer Java 17 (le bon JDK)
+      # ────────────────────────────────────────────────
+      - name: Installer Java 17 (Temurin)
+        # Action officielle pour installer Java
+        uses: actions/setup-java@v4
+        with:
+          # Version exacte de Java qu'on veut
+          java-version: '17'
+
+          # Distribution recommandée (open-source, fiable, rapide)
+          distribution: 'temurin'   # anciennement eclipse-temurin
+
+          # Très important : met en cache le dossier ~/.m2
+          # → les dépendances Maven ne se retéléchargent pas à chaque fois
+          cache: maven
+
+
+      # ────────────────────────────────────────────────
+      # Étape 3 : Compiler + lancer TOUS les tests
+      # ────────────────────────────────────────────────
+      - name: Compiler et exécuter les tests
+        # On exécute cette commande dans le terminal de la machine virtuelle
+        run: |
+          mvn clean verify \
+            --batch-mode \
+            --no-transfer-progress \
+            --errors
+
+        # Explications des options Maven utilisées :
+        #   clean          → supprime tout ce qui a été généré avant (target/)
+        #   verify         → compile + tests unitaires + tests d'intégration + vérifications
+        #   --batch-mode   → moins de couleurs / animations = logs plus lisibles en CI
+        #   --no-transfer-progress → cache le téléchargement des dépendances (plus rapide)
+        #   --errors       → affiche la stacktrace complète en cas d'erreur
+
+
+      # ────────────────────────────────────────────────
+      # Étape 4 : Garder une trace des résultats des tests
+      # Même si le job échoue (très utile pour debugger)
+      # ────────────────────────────────────────────────
+      - name: Sauvegarder les rapports de tests (même en cas d'échec)
+        # Cette étape s'exécute TOUJOURS (même si les tests ont planté)
+        if: always()
+
+        # Action qui permet d'uploader des fichiers en "artefact"
+        uses: actions/upload-artifact@v4
+
+        with:
+          # Nom de l'artefact (on le verra dans l'interface)
+          name: rapports-tests-surefire
+
+          # Dossier où Maven met les rapports XML des tests
+          path: target/surefire-reports/
+
+          # Combien de temps on garde cet artefact (en jours)
+          retention-days: 7
