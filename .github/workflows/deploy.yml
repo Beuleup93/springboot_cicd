@@ -67,7 +67,7 @@ jobs:
             docker rm spring-app || true
 
             # Pull la dernière image
-            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo-app:latest
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest
 
             # Lance le conteneur
             docker run -d \
