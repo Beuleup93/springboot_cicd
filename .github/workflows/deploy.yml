@@ -9,16 +9,18 @@ name: Spring Boot CI + Docker + Deploy to EC2
 on:
   push:
     branches:
-      - main                    # Le workflow se déclenche uniquement quand on push sur la branche main
-      # Pourquoi ? Parce qu'on veut déployer automatiquement uniquement en production
+      - main                    # Le workflow se déclenche uniquement quand on pousse du code sur la branche "main"
+        # Pourquoi ? Parce que "main" est considérée comme la branche de production.
+      # On ne veut pas déployer automatiquement sur les autres branches (develop, feature, etc.)
 
 # ================================================================
-# JOBS : Chaque job s'exécute sur une machine virtuelle séparée
+# JOBS : Chaque job s'exécute sur une machine virtuelle distincte
 # ================================================================
 jobs:
 
   # =================================================================
-  # JOB 1 : TEST
+  # JOB 1 : TESTS
+  # Objectif : Vérifier que le code fonctionne avant de continuer
   # =================================================================
   test:
     name: Exécuter les tests unitaires et d'intégration
@@ -27,31 +29,33 @@ jobs:
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
-        # Cette action clone le dépôt Git dans la machine virtuelle
+        # Cette action clone tout le dépôt Git dans la machine virtuelle GitHub Actions
 
       - name: Installer Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'                  # On utilise Java 17 car c'est la version de notre projet
-          distribution: 'temurin'             # Distribution open-source fiable (Eclipse Temurin)
-          cache: maven                        # Mise en cache des dépendances Maven → accélère énormément les builds suivants
+          java-version: '17'                  # Version de Java utilisée par notre projet Spring Boot
+          distribution: 'temurin'             # Distribution open-source et fiable (Eclipse Temurin)
+          cache: maven                        # Mise en cache des dépendances Maven → gain de temps considérable sur les builds suivants
 
       - name: Exécuter les tests
         run: mvn clean verify --batch-mode --no-transfer-progress --errors
-        # clean     : supprime les anciens fichiers compilés
-        # verify    : compile + lance les tests unitaires + tests d'intégration
-        # --batch-mode : rend les logs plus propres en environnement CI
-        # --no-transfer-progress : masque les barres de progression (plus lisible)
-        # --errors  : affiche les erreurs détaillées en cas d'échec
+        # clean     : Supprime les anciens fichiers compilés (dossier target)
+        # verify    : Compile le projet + exécute les tests unitaires + tests d'intégration
+        # --batch-mode : Rend les logs plus lisibles en environnement CI/CD
+        # --no-transfer-progress : Cache les barres de progression de téléchargement
+        # --errors  : Affiche les erreurs détaillées en cas d'échec (très utile pour le debug)
+
 
   # =================================================================
   # JOB 2 : BUILD & PUSH DOCKER
+  # Objectif : Compiler l'application et créer/pousser l'image Docker
   # =================================================================
   build-and-push:
     name: Build JAR + Construire et pousser l'image Docker
-    needs: test                               # Ce job ne s'exécute QUE si le job "test" a réussi
+    needs: test                               # Ce job ne démarre QUE si le job "test" s'est terminé avec succès
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'       # On ne build et push que sur la branche main (sécurité)
+    if: github.ref == 'refs/heads/main'       # On ne construit et pousse l'image que sur la branche main (sécurité)
 
     steps:
       - name: Récupérer le code source
@@ -64,74 +68,75 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      - name: Compiler et packager l'application (JAR)
+      - name: Build JAR
         run: mvn clean package -DskipTests --batch-mode --no-transfer-progress
-        # -DskipTests : on ne relance pas les tests (déjà faits dans le job précédent)
-        # On crée le fichier .jar qui sera inclus dans l'image Docker
+        # -DskipTests : On ne relance pas les tests (déjà faits dans le job précédent)
+        # On génère le fichier .jar qui sera intégré dans l'image Docker
 
       # ==================== PARTIE DOCKER ====================
 
       - name: Configurer Docker Buildx
         uses: docker/setup-buildx-action@v3
-        # Buildx est l'outil moderne de Docker pour construire les images plus efficacement
+        # Buildx est l'outil moderne recommandé par Docker pour construire les images (meilleure performance et cache)
 
       - name: Se connecter à Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}     # Secret contenant ton username Docker Hub
-          password: ${{ secrets.DOCKERHUB_TOKEN }}        # Secret contenant ton Personal Access Token (PAT)
-          logout: true                                    # Déconnexion automatique à la fin (bonne pratique de sécurité)
+          username: ${{ secrets.DOCKERHUB_USERNAME }}   # Secret contenant ton nom d'utilisateur Docker Hub
+          password: ${{ secrets.DOCKERHUB_TOKEN }}      # Secret contenant ton Personal Access Token (PAT)
+          logout: true                                  # Déconnexion automatique à la fin du job (bonne pratique de sécurité)
 
       - name: Construire et pousser l'image Docker
         uses: docker/build-push-action@v6
         with:
-          context: .                                      # Le contexte de build = racine du projet (où se trouve le Dockerfile)
-          push: true                                      # true = on pousse vraiment l'image sur Docker Hub
+          context: .                                    # Le contexte de build = dossier racine du projet (contient le Dockerfile)
+          push: true                                    # true = on pousse réellement l'image sur Docker Hub
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest     # Tag "latest" = version la plus récente
-            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }}  # Tag avec le SHA du commit = traçabilité
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest          # Tag "latest" = version la plus récente et facile à utiliser
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }} # Tag avec le SHA du commit = traçabilité (permet de revenir à une ancienne version)
           # Pourquoi deux tags ?
-          # - latest : facile à utiliser pour le déploiement
-          # - SHA : permet de revenir à une version précise en cas de problème
+          # - "latest" : Simple à utiliser lors du déploiement
+          # - SHA du commit : Permet d'avoir une version précise et de faire du rollback facilement
+
 
   # =================================================================
-  # JOB 3 : DÉPLOIEMENT SUR AWS EC2
+  # JOB 3 : DÉPLOIEMENT SUR SERVEUR AWS EC2
   # =================================================================
   deploy:
     name: Déploiement sur serveur EC2 via SSH
-    needs: build-and-push                     # On ne déploie que si le build + push a réussi
+    needs: build-and-push                     # Ce job ne s'exécute que si le build + push Docker a réussi
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Déployer l'application sur EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3      # Action qui permet d'exécuter des commandes SSH à distance
+        uses: appleboy/ssh-action@v1.0.3      # Action très utilisée pour exécuter des commandes à distance via SSH
 
         with:
-          host: ${{ secrets.EC2_HOST }}                    # IP publique de ton instance EC2
-          username: ${{ secrets.EC2_USERNAME }}            # Utilisateur SSH (généralement "ubuntu")
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}          # Clé SSH privée (contenu du fichier .pem)
-          port: 22                                         # Port SSH standard
+          host: ${{ secrets.EC2_HOST }}                    # IP publique de ton instance EC2 (stockée dans les secrets)
+          username: ${{ secrets.EC2_USERNAME }}            # Nom de l'utilisateur SSH (généralement "ubuntu" pour les AMI Ubuntu)
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}          # Clé SSH privée complète (contenu du fichier .pem)
+          port: 22                                         # Port standard SSH
 
-          script: |                                        # Script qui sera exécuté sur le serveur distant
+          script: |                                        # Script Bash qui sera exécuté sur le serveur distant
             echo "=== Déploiement démarré sur $(hostname) ==="
 
-            # Nettoyage de l'ancien conteneur (s'il existe)
+            # Nettoyage de l'ancien conteneur (s'il existe déjà)
             docker stop spring-app || true
             docker rm spring-app || true
-            # "|| true" = continue même si la commande échoue (ex: conteneur n'existe pas)
+            # "|| true" permet de continuer même si le conteneur n'existe pas (évite les erreurs)
 
-            # On définit le nom complet de l'image pour éviter les erreurs
+            # On stocke le nom complet de l'image dans une variable pour plus de lisibilité et éviter les erreurs
             IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest"
 
             echo "Pulling image: $IMAGE_NAME"
-            docker pull $IMAGE_NAME
+            docker pull $IMAGE_NAME                       # Télécharge la dernière version de l'image depuis Docker Hub
 
             echo "Lancement du nouveau conteneur..."
-            docker run -d \
-              --name spring-app \
-              --restart unless-stopped \        # Redémarre automatiquement si le serveur redémarre
-              -p 8080:8080 \                    # Mappe le port 8080 de l'hôte vers le conteneur
+            docker run -d \                               # -d = mode détaché (en arrière-plan)
+              --name spring-app \                         # Nom du conteneur
+              --restart unless-stopped \                  # Redémarre automatiquement le conteneur si le serveur redémarre
+              -p 8080:8080 \                              # Mappe le port 8080 de l'hôte vers le port 8080 du conteneur
               $IMAGE_NAME
 
             echo "Déploiement terminé avec succès !"
