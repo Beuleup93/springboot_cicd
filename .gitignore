@@ -34,4 +34,4 @@ build/
 
 ## CI CD WORKFLOW ###
 .github/workflows-disabled
-.github/workflows-disabled/deploy.yml
+.github/workflows/deploy.yml
