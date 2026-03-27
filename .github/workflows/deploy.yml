@@ -29,22 +29,16 @@ jobs:
     steps:
       - name: Récupérer le code source
         uses: actions/checkout@v4
-        # Cette action clone tout le dépôt Git dans la machine virtuelle GitHub Actions
 
       - name: Installer Java 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'                  # Version de Java utilisée par notre projet Spring Boot
-          distribution: 'temurin'             # Distribution open-source et fiable (Eclipse Temurin)
-          cache: maven                        # Mise en cache des dépendances Maven → gain de temps considérable sur les builds suivants
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
 
       - name: Exécuter les tests
         run: mvn clean verify --batch-mode --no-transfer-progress --errors
-        # clean     : Supprime les anciens fichiers compilés (dossier target)
-        # verify    : Compile le projet + exécute les tests unitaires + tests d'intégration
-        # --batch-mode : Rend les logs plus lisibles en environnement CI/CD
-        # --no-transfer-progress : Cache les barres de progression de téléchargement
-        # --errors  : Affiche les erreurs détaillées en cas d'échec (très utile pour le debug)
 
 
   # =================================================================
@@ -74,7 +68,6 @@ jobs:
 
       - name: Configurer Docker Buildx
         uses: docker/setup-buildx-action@v3
-        # Buildx est l'outil moderne de Docker pour construire les images plus rapidement et avec un meilleur cache
 
       - name: Se connecter à Docker Hub
         uses: docker/login-action@v3
@@ -82,20 +75,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           logout: true
-        # On se connecte à Docker Hub avant de pousser l'image
 
       - name: Construire et pousser l'image Docker
         uses: docker/build-push-action@v6
         with:
-          context: .                                      # Le dossier racine du projet (contient le Dockerfile)
-          push: true                                      # true = on pousse l'image sur Docker Hub après l'avoir construite
+          context: .
+          push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }}
-          # Explication des tags :
-          # - "latest"     : Tag classique, facile à utiliser lors du déploiement
-          # - "${{ github.sha }}" : Tag avec l'identifiant du commit (SHA)
-          #   → Permet d'avoir une version unique et de faire du rollback facilement si besoin
+    
 
 
   # =================================================================
@@ -103,40 +92,39 @@ jobs:
   # =================================================================
   deploy:
     name: Déploiement sur serveur EC2 via SSH
-    needs: build-and-push                     # Ce job ne s'exécute que si le build + push Docker a réussi
+    needs: build-and-push
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
 
     steps:
       - name: Déployer l'application sur EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3      # Action très utilisée pour exécuter des commandes à distance via SSH
+        uses: appleboy/ssh-action@v1.0.3
 
         with:
-          host: ${{ secrets.EC2_HOST }}                    # IP publique de ton instance EC2 (stockée dans les secrets)
-          username: ${{ secrets.EC2_USERNAME }}            # Nom de l'utilisateur SSH (généralement "ubuntu" pour les AMI Ubuntu)
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}          # Clé SSH privée complète (contenu du fichier .pem)
-          port: 22                                         # Port standard SSH
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: 22
 
-          script: |                                        # Script Bash qui sera exécuté sur le serveur distant
+          script: |
             echo "=== Déploiement démarré sur $(hostname) ==="
 
-            # Nettoyage de l'ancien conteneur (s'il existe déjà)
             docker stop spring-app || true
             docker rm spring-app || true
-            # "|| true" permet de continuer même si le conteneur n'existe pas (évite les erreurs)
 
-            # On stocke le nom complet de l'image dans une variable pour plus de lisibilité et éviter les erreurs
             IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest"
 
-            echo "Pulling image: $IMAGE_NAME"
-            docker pull $IMAGE_NAME                       # Télécharge la dernière version de l'image depuis Docker Hub
+            echo "Pulling latest image..."
+            docker pull $IMAGE_NAME
 
-            echo "Lancement du nouveau conteneur..."
-            docker run -d \                               # -d = mode détaché (en arrière-plan)
-              --name spring-app \                         # Nom du conteneur
-              --restart unless-stopped \                  # Redémarre automatiquement le conteneur si le serveur redémarre
-              -p 8080:8080 \                              # Mappe le port 8080 de l'hôte vers le port 8080 du conteneur
+            echo "Starting new container..."
+            docker run -d \
+              --name spring-app \
+              --restart unless-stopped \
+              -p 8080:8080 \
+              --env SPRING_PROFILES_ACTIVE=prod \
               $IMAGE_NAME
 
-            echo "Déploiement terminé avec succès !"
-            echo "Application disponible sur : http://$(curl -s ifconfig.me):8080"
+            echo "Conteneur démarré avec succès"
+            echo "URL : http://$(curl -s ifconfig.me):8080"
+            echo "Logs du conteneur : docker logs spring-app --tail 50"
