@@ -53,13 +53,12 @@ jobs:
   # =================================================================
   build-and-push:
     name: Build JAR + Construire et pousser l'image Docker
-    needs: test                               # Ce job ne démarre QUE si le job "test" s'est terminé avec succès
+    needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'       # On ne construit et pousse l'image que sur la branche main (sécurité)
+    if: github.ref == 'refs/heads/main'
 
     steps:
-      - name: Récupérer le code source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Installer Java 17
         uses: actions/setup-java@v4
@@ -70,33 +69,33 @@ jobs:
 
       - name: Build JAR
         run: mvn clean package -DskipTests --batch-mode --no-transfer-progress
-        # -DskipTests : On ne relance pas les tests (déjà faits dans le job précédent)
-        # On génère le fichier .jar qui sera intégré dans l'image Docker
 
       # ==================== PARTIE DOCKER ====================
 
       - name: Configurer Docker Buildx
         uses: docker/setup-buildx-action@v3
-        # Buildx est l'outil moderne recommandé par Docker pour construire les images (meilleure performance et cache)
+        # Buildx est l'outil moderne de Docker pour construire les images plus rapidement et avec un meilleur cache
 
       - name: Se connecter à Docker Hub
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}   # Secret contenant ton nom d'utilisateur Docker Hub
-          password: ${{ secrets.DOCKERHUB_TOKEN }}      # Secret contenant ton Personal Access Token (PAT)
-          logout: true                                  # Déconnexion automatique à la fin du job (bonne pratique de sécurité)
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          logout: true
+        # On se connecte à Docker Hub avant de pousser l'image
 
       - name: Construire et pousser l'image Docker
         uses: docker/build-push-action@v6
         with:
-          context: .                                    # Le contexte de build = dossier racine du projet (contient le Dockerfile)
-          push: true                                    # true = on pousse réellement l'image sur Docker Hub
+          context: .                                      # Le dossier racine du projet (contient le Dockerfile)
+          push: true                                      # true = on pousse l'image sur Docker Hub après l'avoir construite
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest          # Tag "latest" = version la plus récente et facile à utiliser
-            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }} # Tag avec le SHA du commit = traçabilité (permet de revenir à une ancienne version)
-          # Pourquoi deux tags ?
-          # - "latest" : Simple à utiliser lors du déploiement
-          # - SHA du commit : Permet d'avoir une version précise et de faire du rollback facilement
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/springboot-app:${{ github.sha }}
+          # Explication des tags :
+          # - "latest"     : Tag classique, facile à utiliser lors du déploiement
+          # - "${{ github.sha }}" : Tag avec l'identifiant du commit (SHA)
+          #   → Permet d'avoir une version unique et de faire du rollback facilement si besoin
 
 
   # =================================================================
