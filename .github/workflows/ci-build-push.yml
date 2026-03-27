@@ -1,0 +1,109 @@
+# ================================================================
+# NOM DU WORKFLOW COMPLET
+name: Spring Boot CI + Build & Push Docker (Exercice 3)
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+
+  pull_request:
+    branches:
+      - main
+      - develop
+
+# ================================================================
+# LES JOBS : les "tâches" indépendantes (chaque job = une VM séparée)
+# On en a deux ici :
+#   1. test     → toujours exécuté (push + PR)
+#   2. build-and-push → SEULEMENT sur main ET si les tests passent
+# ================================================================
+jobs:
+
+  # ────────────────────────────────────────────────
+  # JOB 1 : Execution TESTS
+  # ────────────────────────────────────────────────
+  test:
+    name: Tests unitaires & d'intégration
+    runs-on: ubuntu-latest
+    steps:
+
+      # Étape 1 : Récupérer tout le code du dépôt (indispensable !)
+      - name: Récupérer le code source du dépôt
+        uses: actions/checkout@v4
+
+      # Étape 2 : Installer Java 17 + mettre en cache les dépendances Maven
+      - name: Installer Java 17 (Temurin) + cache Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Étape 3 : Compiler + lancer TOUS les tests
+      - name: Compiler et exécuter les tests
+
+        # On exécute cette commande dans le terminal de la machine virtuelle
+        run: |
+          mvn clean verify \
+            --batch-mode \
+            --no-transfer-progress \
+            --errors
+
+  # ────────────────────────────────────────────────
+  # JOB 2 : BUILD & PUSH DE L'IMAGE DOCKER
+  # ────────────────────────────────────────────────
+  build-and-push:
+    name: Build JAR + Construire & Pousser l'image Docker Hub
+    runs-on: ubuntu-latest
+
+    # Conditions pour lancer ce job :
+    #   1. Les tests doivent avoir réussi (sinon inutile de build/push)
+    #   2. On est sur la branche main (pas sur develop ou une PR)
+    needs: test
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+
+      # Étape 1 : Récupérer à nouveau le code
+      - name: Récupérer le code source
+        uses: actions/checkout@v4
+
+      # Étape 2 : Réinstaller Java + cache
+      - name: Installer Java 17 + cache Maven
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # Étape 3 : Compiler le JAR
+      - name: Compiler et packager le JAR (sans relancer les tests)
+        run: mvn clean package -DskipTests --batch-mode --no-transfer-progress
+
+      # ────────────────────────────────────────────────
+      # PARTIE DOCKER : on passe aux outils officiels Docker pour GitHub Actions
+      # ────────────────────────────────────────────────
+
+      # Étape 4 : Installer Docker Buildx
+      - name: Configurer Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # Étape 5 : Se connecter à Docker Hub avec les secrets GitHub
+      - name: Se connecter à Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Étape 6 : Construire l'image ET la pousser sur Docker Hub
+      - name: Construire et pousser l'image Docker
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/spring-demo:${{ github.sha }}

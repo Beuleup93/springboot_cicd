@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+## CI CD WORKFLOW ###
+.github/workflows-disabled
+.github/workflows/deploy.yml
